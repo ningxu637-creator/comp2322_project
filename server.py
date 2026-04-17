@@ -41,6 +41,12 @@ if os.path.exists(file_path):
         content_type = "text/html"
     elif path.endswith(".txt"):
         content_type = "text/plain"
+    elif path.endswith(".jpg") or path.endswith(".jpeg"):
+        content_type = "image/jpeg"
+    elif path.endswith(".png"):
+        content_type = "image/png"
+    elif path.endswith(".gif"):
+        content_type = "image/gif"
     else:
         content_type = "application/octet-stream"
 
