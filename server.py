@@ -1,6 +1,7 @@
 import socket
 import os
 import threading
+from email.utils import formatdate, parsedate_to_datetime
 
 HOST = "127.0.0.1"
 PORT = 8080
@@ -22,18 +23,33 @@ def get_content_type(path):
         return "application/octet-stream"
 
 
-def send_response(client_socket, status_line, content_type, body, method):
+def get_last_modified_header(file_path):
+    mtime = os.path.getmtime(file_path)
+    return formatdate(mtime, usegmt=True)
+
+
+def send_response(client_socket, status_line, content_type, body, method, extra_headers=""):
     response_header = (
         f"{status_line}\r\n"
         f"Content-Type: {content_type}\r\n"
         f"Content-Length: {len(body)}\r\n"
         "Connection: close\r\n"
+        f"{extra_headers}"
         "\r\n"
     )
 
     client_socket.sendall(response_header.encode("utf-8"))
-    if method != "HEAD":
+    if method != "HEAD" and not status_line.startswith("HTTP/1.1 304"):
         client_socket.sendall(body)
+
+
+def parse_headers(lines):
+    headers = {}
+    for line in lines[1:]:
+        if ":" in line:
+            key, value = line.split(":", 1)
+            headers[key.strip().lower()] = value.strip()
+    return headers
 
 
 def handle_client(client_socket, client_address):
@@ -98,7 +114,6 @@ def handle_client(client_socket, client_address):
         if path == "/":
             path = "/index.html"
 
-        # 403 Forbidden: block path traversal
         if ".." in path:
             body = b"<html><body><h1>403 Forbidden</h1></body></html>"
             send_response(
@@ -110,9 +125,33 @@ def handle_client(client_socket, client_address):
             )
             return
 
+        headers = parse_headers(lines)
+
         file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
 
         if os.path.exists(file_path):
+            last_modified = get_last_modified_header(file_path)
+            extra_headers = f"Last-Modified: {last_modified}\r\n"
+
+           
+            if "if-modified-since" in headers:
+                try:
+                    ims_time = int (parsedate_to_datetime(headers["if-modified-since"]).timestamp())
+                    file_mtime = int( os.path.getmtime(file_path))
+
+                    if file_mtime <= ims_time:
+                        send_response(
+                            client_socket,
+                            "HTTP/1.1 304 Not Modified",
+                            get_content_type(path),
+                            b"",
+                            method,
+                            extra_headers
+                        )
+                        return
+                except Exception:
+                    pass
+
             with open(file_path, "rb") as f:
                 body = f.read()
 
@@ -123,7 +162,8 @@ def handle_client(client_socket, client_address):
                 "HTTP/1.1 200 OK",
                 content_type,
                 body,
-                method
+                method,
+                extra_headers
             )
         else:
             body = b"<html><body><h1>404 Not Found</h1></body></html>"
