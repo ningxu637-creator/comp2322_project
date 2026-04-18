@@ -33,19 +33,19 @@ def get_last_modified_header(file_path):
 def write_log(client_address, method, path, status_text):
     access_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = client_address[0]
-
     log_line = f'{client_ip} - [{access_time}] "{method} {path}" {status_text}\n'
 
     with open(LOG_FILE, "a", encoding="utf-8") as log_file:
         log_file.write(log_line)
 
 
-def send_response(client_socket, status_line, content_type, body, method, extra_headers=""):
+def send_response(client_socket, status_line, content_type, body, method,
+                  connection_value="close", extra_headers=""):
     response_header = (
         f"{status_line}\r\n"
         f"Content-Type: {content_type}\r\n"
         f"Content-Length: {len(body)}\r\n"
-        "Connection: close\r\n"
+        f"Connection: {connection_value}\r\n"
         f"{extra_headers}"
         "\r\n"
     )
@@ -64,150 +64,173 @@ def parse_headers(lines):
     return headers
 
 
-def handle_client(client_socket, client_address):
-    print(f"Connected by: {client_address}")
-
+def process_request(client_socket, client_address, request_data):
     method = "UNKNOWN"
     path = "/"
     status_text = "500 Internal Server Error"
 
-    try:
-        request_data = client_socket.recv(1024).decode("utf-8", errors="ignore")
-        print("Request received:")
-        print(request_data)
+    lines = request_data.splitlines()
+    if not lines:
+        return "close"
 
-        if not request_data:
-            return
+    request_line = lines[0]
+    parts = request_line.split()
 
-        lines = request_data.splitlines()
-        if not lines:
-            return
+    headers = parse_headers(lines)
+    connection_value = headers.get("connection", "close").lower()
 
-        request_line = lines[0]
-        parts = request_line.split()
+    if connection_value not in ["keep-alive", "close"]:
+        connection_value = "close"
 
-        if len(parts) < 3:
-            body = b"<html><body><h1>400 Bad Request</h1></body></html>"
-            status_text = "400 Bad Request"
-            send_response(
-                client_socket,
-                "HTTP/1.1 400 Bad Request",
-                "text/html",
-                body,
-                "GET"
-            )
-            write_log(client_address, method, path, status_text)
-            return
+    if len(parts) < 3:
+        body = b"<html><body><h1>400 Bad Request</h1></body></html>"
+        status_text = "400 Bad Request"
+        send_response(
+            client_socket,
+            "HTTP/1.1 400 Bad Request",
+            "text/html",
+            body,
+            "GET",
+            connection_value
+        )
+        write_log(client_address, method, path, status_text)
+        return connection_value
 
-        method = parts[0]
-        path = parts[1]
-        version = parts[2]
+    method = parts[0]
+    path = parts[1]
+    version = parts[2]
 
-        print("Method =", method)
-        print("Path =", path)
-        print("Version =", version)
+    print("Method =", method)
+    print("Path =", path)
+    print("Version =", version)
+    print("Connection =", connection_value)
 
-        if method not in ["GET", "HEAD"]:
-            body = b"<html><body><h1>400 Bad Request</h1></body></html>"
-            status_text = "400 Bad Request"
-            send_response(
-                client_socket,
-                "HTTP/1.1 400 Bad Request",
-                "text/html",
-                body,
-                method
-            )
-            write_log(client_address, method, path, status_text)
-            return
+    if method not in ["GET", "HEAD"]:
+        body = b"<html><body><h1>400 Bad Request</h1></body></html>"
+        status_text = "400 Bad Request"
+        send_response(
+            client_socket,
+            "HTTP/1.1 400 Bad Request",
+            "text/html",
+            body,
+            method,
+            connection_value
+        )
+        write_log(client_address, method, path, status_text)
+        return connection_value
 
-        if not version.startswith("HTTP/"):
-            body = b"<html><body><h1>400 Bad Request</h1></body></html>"
-            status_text = "400 Bad Request"
-            send_response(
-                client_socket,
-                "HTTP/1.1 400 Bad Request",
-                "text/html",
-                body,
-                method
-            )
-            write_log(client_address, method, path, status_text)
-            return
+    if not version.startswith("HTTP/"):
+        body = b"<html><body><h1>400 Bad Request</h1></body></html>"
+        status_text = "400 Bad Request"
+        send_response(
+            client_socket,
+            "HTTP/1.1 400 Bad Request",
+            "text/html",
+            body,
+            method,
+            connection_value
+        )
+        write_log(client_address, method, path, status_text)
+        return connection_value
 
-        if path == "/":
-            path = "/index.html"
+    if path == "/":
+        path = "/index.html"
 
-        if ".." in path:
-            body = b"<html><body><h1>403 Forbidden</h1></body></html>"
-            status_text = "403 Forbidden"
-            send_response(
-                client_socket,
-                "HTTP/1.1 403 Forbidden",
-                "text/html",
-                body,
-                method
-            )
-            write_log(client_address, method, path, status_text)
-            return
+    if ".." in path:
+        body = b"<html><body><h1>403 Forbidden</h1></body></html>"
+        status_text = "403 Forbidden"
+        send_response(
+            client_socket,
+            "HTTP/1.1 403 Forbidden",
+            "text/html",
+            body,
+            method,
+            connection_value
+        )
+        write_log(client_address, method, path, status_text)
+        return connection_value
 
-        headers = parse_headers(lines)
+    file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
 
-        file_path = os.path.join(WEB_ROOT, path.lstrip("/"))
+    if os.path.exists(file_path):
+        last_modified = get_last_modified_header(file_path)
+        extra_headers = f"Last-Modified: {last_modified}\r\n"
 
-        if os.path.exists(file_path):
-            last_modified = get_last_modified_header(file_path)
-            extra_headers = f"Last-Modified: {last_modified}\r\n"
+        if "if-modified-since" in headers:
+            try:
+                ims_time = int(parsedate_to_datetime(headers["if-modified-since"]).timestamp())
+                file_mtime = int(os.path.getmtime(file_path))
 
-            if "if-modified-since" in headers:
-                try:
-                    ims_time = int(parsedate_to_datetime(headers["if-modified-since"]).timestamp())
-                    file_mtime = int(os.path.getmtime(file_path))
+                if file_mtime <= ims_time:
+                    status_text = "304 Not Modified"
+                    send_response(
+                        client_socket,
+                        "HTTP/1.1 304 Not Modified",
+                        get_content_type(path),
+                        b"",
+                        method,
+                        connection_value,
+                        extra_headers
+                    )
+                    write_log(client_address, method, path, status_text)
+                    return connection_value
+            except Exception:
+                pass
 
-                    if file_mtime <= ims_time:
-                        status_text = "304 Not Modified"
-                        send_response(
-                            client_socket,
-                            "HTTP/1.1 304 Not Modified",
-                            get_content_type(path),
-                            b"",
-                            method,
-                            extra_headers
-                        )
-                        write_log(client_address, method, path, status_text)
-                        return
-                except Exception:
-                    pass
+        with open(file_path, "rb") as f:
+            body = f.read()
 
-            with open(file_path, "rb") as f:
-                body = f.read()
+        content_type = get_content_type(path)
+        status_text = "200 OK"
 
-            content_type = get_content_type(path)
-            status_text = "200 OK"
-
-            send_response(
-                client_socket,
-                "HTTP/1.1 200 OK",
-                content_type,
-                body,
-                method,
-                extra_headers
-            )
-            write_log(client_address, method, path, status_text)
-        else:
-            body = b"<html><body><h1>404 Not Found</h1></body></html>"
-            status_text = "404 Not Found"
-            send_response(
-                client_socket,
-                "HTTP/1.1 404 Not Found",
-                "text/html",
-                body,
-                method
-            )
-            write_log(client_address, method, path, status_text)
-
-    except Exception as e:
-        print("Error:", e)
+        send_response(
+            client_socket,
+            "HTTP/1.1 200 OK",
+            content_type,
+            body,
+            method,
+            connection_value,
+            extra_headers
+        )
+        write_log(client_address, method, path, status_text)
+    else:
+        body = b"<html><body><h1>404 Not Found</h1></body></html>"
+        status_text = "404 Not Found"
+        send_response(
+            client_socket,
+            "HTTP/1.1 404 Not Found",
+            "text/html",
+            body,
+            method,
+            connection_value
+        )
         write_log(client_address, method, path, status_text)
 
+    return connection_value
+
+
+def handle_client(client_socket, client_address):
+    print(f"Connected by: {client_address}")
+    client_socket.settimeout(10)
+
+    try:
+        while True:
+            request_data = client_socket.recv(4096).decode("utf-8", errors="ignore")
+            if not request_data:
+                break
+
+            print("Request received:")
+            print(request_data)
+
+            connection_value = process_request(client_socket, client_address, request_data)
+
+            if connection_value == "close":
+                break
+
+    except socket.timeout:
+        print(f"Connection timeout: {client_address}")
+    except Exception as e:
+        print("Error:", e)
     finally:
         client_socket.close()
         print(f"Connection closed: {client_address}")
@@ -234,7 +257,6 @@ def main():
 
     except KeyboardInterrupt:
         print("\nServer stopped.")
-
     finally:
         server_socket.close()
 
