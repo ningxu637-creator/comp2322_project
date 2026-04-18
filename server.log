@@ -1,0 +1,5 @@
+127.0.0.1 - [2026-04-18 11:17:08] "GET /index.html" 200 OK
+127.0.0.1 - [2026-04-18 11:17:36] "GET /hello.txt" 200 OK
+127.0.0.1 - [2026-04-18 11:17:46] "GET /../README.md" 403 Forbidden
+127.0.0.1 - [2026-04-18 11:17:57] "POST /index.html" 400 Bad Request
+127.0.0.1 - [2026-04-18 11:18:04] "GET /notfound.html" 404 Not Found
