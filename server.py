@@ -1,9 +1,15 @@
+# COMP2322 Computer Networking
+# Multi-threaded Web Server implemented with Python sockets
+# Supports GET, HEAD, 200/400/403/404/304, Last-Modified,
+# If-Modified-Since, Connection: keep-alive / close, and logging
+
 import socket
 import os
 import threading
 from datetime import datetime
 from email.utils import formatdate, parsedate_to_datetime
 
+# Server configuration
 HOST = "127.0.0.1"
 PORT = 8080
 WEB_ROOT = "www"
@@ -11,6 +17,7 @@ LOG_FILE = "server.log"
 
 
 def get_content_type(path):
+    # Return the MIME type based on file extension
     if path.endswith(".html"):
         return "text/html"
     elif path.endswith(".txt"):
@@ -24,13 +31,14 @@ def get_content_type(path):
     else:
         return "application/octet-stream"
 
-
+# Convert the file modification time to an HTTP date string
 def get_last_modified_header(file_path):
     mtime = os.path.getmtime(file_path)
     return formatdate(mtime, usegmt=True)
 
 
 def write_log(client_address, method, path, status_text):
+    # Append one request record to the log file
     access_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = client_address[0]
     log_line = f'{client_ip} - [{access_time}] "{method} {path}" {status_text}\n'
@@ -38,7 +46,7 @@ def write_log(client_address, method, path, status_text):
     with open(LOG_FILE, "a", encoding="utf-8") as log_file:
         log_file.write(log_line)
 
-
+# Build and send the HTTP response header and optional body
 def send_response(client_socket, status_line, content_type, body, method,
                   connection_value="close", extra_headers=""):
     response_header = (
@@ -56,6 +64,7 @@ def send_response(client_socket, status_line, content_type, body, method,
 
 
 def parse_headers(lines):
+    # Parse HTTP headers into a dictionary
     headers = {}
     for line in lines[1:]:
         if ":" in line:
@@ -65,6 +74,7 @@ def parse_headers(lines):
 
 
 def process_request(client_socket, client_address, request_data):
+    # Process one HTTP request and send the corresponding response
     method = "UNKNOWN"
     path = "/"
     status_text = "500 Internal Server Error"
@@ -104,7 +114,8 @@ def process_request(client_socket, client_address, request_data):
     print("Path =", path)
     print("Version =", version)
     print("Connection =", connection_value)
-
+    
+# Only GET and HEAD are supported in this server
     if method not in ["GET", "HEAD"]:
         body = b"<html><body><h1>400 Bad Request</h1></body></html>"
         status_text = "400 Bad Request"
@@ -235,7 +246,7 @@ def handle_client(client_socket, client_address):
         client_socket.close()
         print(f"Connection closed: {client_address}")
 
-
+# Create the listening socket and start accepting client connections
 def main():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
