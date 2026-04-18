@@ -259,7 +259,4 @@ def main():
         print("\nServer stopped.")
     finally:
         server_socket.close()
-
-
-if __name__ == "__main__":
-    main()
+    
